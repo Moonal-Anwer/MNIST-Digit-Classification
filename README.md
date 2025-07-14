@@ -1,5 +1,5 @@
-# MNIST-Digit-Classificati / Models
+# MNIST-Digit-Classification
 
-##  Project Documentation/models
+First project in our NTI machine learning course.
 
-You can read the models' documentation [here](https://docs.google.com/document/d/1_J24mj7XxqnSuar8LxZALmtAb9PtCm6bRXJowGm6pDQ/edit?usp=sharing).
+## Project Documentation / Test
