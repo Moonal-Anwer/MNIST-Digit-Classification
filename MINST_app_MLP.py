@@ -3,18 +3,8 @@ import numpy as np
 from PIL import Image, ImageOps
 import tensorflow as tf # Import TensorFlow
 
-try:
-    model = tf.keras.models.load_model("mlp_model.h5")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    print("Please ensure 'mlp_model.h5' is in the correct directory.")
-    
-    model = tf.keras.Sequential([
-        tf.keras.layers.Flatten(input_shape=(28, 28)),
-        tf.keras.layers.Dense(128, activation='relu'),
-        tf.keras.layers.Dense(10, activation='softmax')
-    ])
-    print("Using a dummy model for demonstration purposes.")
+model = tf.keras.models.load_model("mlp_model.h5")
+
 
 
 def predict_digit(img) -> tuple[dict, str]: 
