@@ -1,71 +1,82 @@
 import gradio as gr
 import numpy as np
 from PIL import Image, ImageOps
+import tensorflow as tf # Import TensorFlow
 
-import tensorflow as tf 
-
-model = tf.keras.models.load_model("mlp_model.h5") 
-
-def preprocess(image_input):
-
-    image_array = None
-
-    if isinstance(image_input, dict):
+try:
+    model = tf.keras.models.load_model("mlp_model.h5")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    print("Please ensure 'mlp_model.h5' is in the correct directory.")
     
-        if 'image' in image_input and image_input['image'] is not None:
-            image_array = image_input['image']
-        elif 'composite' in image_input and image_input['composite'] is not None:
-            image_array = image_input['composite']
-       
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=(28, 28)),
+        tf.keras.layers.Dense(128, activation='relu'),
+        tf.keras.layers.Dense(10, activation='softmax')
+    ])
+    print("Using a dummy model for demonstration purposes.")
+
+
+def predict_digit(img) -> tuple[dict, str]: 
+    if img is None:
+        return {str(i): 0.0 for i in range(10)}, "No digit drawn."
+
+    
+    if isinstance(img, dict):
+        if 'composite' in img and img['composite'] is not None:
+            img_array = img['composite']
         else:
-            for value in image_input.values():
-                if isinstance(value, np.ndarray):
-                    image_array = value
-                    break
-    elif isinstance(image_input, np.ndarray):
-       
-        image_array = image_input
-
-    if image_array is None:
-      
-        return np.zeros((1, 784))
-
-   
-    if image_array.dtype != np.uint8:
-       
-        if image_array.max() > 1.0:
-            image_array = image_array.astype(np.uint8)
-        else: 
-            image_array = (image_array * 255).astype(np.uint8)
-
-
-    img = Image.fromarray(image_array).convert("L") 
-    img = ImageOps.invert(img)                        
-    img = img.resize((28, 28))                       
-    img_array = np.array(img) / 255.0                
-    flat = img_array.flatten().reshape(1, -1)        
-    return flat
-
-
-def predict_digit(image_input):
-    processed = preprocess(image_input)
-   
-    if np.all(processed == 0):
-        return "Please draw a digit."
+            
+            return {str(i): 0.0 for i in range(10)}, "No valid image data found in Sketchpad output."
+    elif isinstance(img, np.ndarray):
+        img_array = img
     else:
-        prediction_probabilities = model.predict(processed)
-        predicted_digit = np.argmax(prediction_probabilities)
-        return f"Predicted Digit: {int(predicted_digit)}"
+        
+        return {str(i): 0.0 for i in range(10)}, "Unexpected input type from Sketchpad."
+
+    
+    img_pil = Image.fromarray(img_array.astype('uint8'), 'RGB')
+
+    
+    img_pil = img_pil.convert('L')
+
+    
+    img_pil = img_pil.resize((28, 28))
+
+    
+    img_pil = ImageOps.invert(img_pil)
 
 
-interface = gr.Interface(
+    img_array_processed = np.array(img_pil) / 255.0
+
+    
+    img_array_processed = img_array_processed.reshape(1, 28 * 28) 
+
+    predictions = model.predict(img_array_processed)[0] 
+
+    
+    confidences = {str(i): float(predictions[i]) for i in range(10)}
+
+    
+    predicted_digit = str(np.argmax(predictions))
+
+    return confidences, f"Predicted Digit: {predicted_digit}"
+
+
+iface = gr.Interface(
     fn=predict_digit,
-    inputs=gr.Sketchpad(label="Draw a digit (0–9)"),
-    outputs="text",
-    title="MLP Digit Recognizer", 
-    theme="soft"
+    inputs=gr.Sketchpad(
+        label="Draw a digit (0-9) here",
+        image_mode="RGB", 
+    ),
+    outputs=[
+        gr.Label(label="Confidence Scores", num_top_classes=10),
+        gr.Textbox(label="Prediction")
+    ],
+    title="Handwritten Digit Recognizer",
+    description="Draw a single digit (0-9) in the sketchpad, and the model will predict what it is!",
+    allow_flagging="never" 
 )
 
 
-if __name__ == "__main__":
-    interface.launch()
+iface.launch()
