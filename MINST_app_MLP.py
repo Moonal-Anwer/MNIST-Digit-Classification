@@ -1,86 +1,111 @@
 import gradio as gr
 import numpy as np
 from PIL import Image, ImageOps
-# import joblib # No longer needed for loading .h5 Keras models
 import tensorflow as tf # Import TensorFlow
 
-# Load the trained model
-# model = joblib.load("mlp_model.h5") # THIS IS THE INCORRECT LINE
-model = tf.keras.models.load_model("mlp_model.h5") # THIS IS THE CORRECT LINE
+# Load the pre-trained model
+# IMPORTANT: Ensure 'mlp_model.h5' is in the same directory as this script,
+# or provide the full path to the model file.
+try:
+    model = tf.keras.models.load_model("mlp_model.h5")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    print("Please ensure 'mlp_model.h5' is in the correct directory.")
+    # Create a dummy model for demonstration if the actual model fails to load
+    # In a real scenario, you would handle this more robustly, e.g., by exiting or providing a fallback.
+    model = tf.keras.Sequential([
+        tf.keras.layers.Flatten(input_shape=(28, 28)),
+        tf.keras.layers.Dense(128, activation='relu'),
+        tf.keras.layers.Dense(10, activation='softmax')
+    ])
+    print("Using a dummy model for demonstration purposes.")
 
-# Preprocess function
-def preprocess(image_input):
-    # Gradio's Sketchpad might return a dictionary with 'image' and 'mask' keys,
-    # or just the image array if it's a simpler setup.
-    # We need to ensure we're getting the actual numpy array for the image.
 
-    image_array = None
+def predict_digit(img) -> tuple[dict, str]: # Removed type hint for now to handle dict or array
+    """
+    Preprocesses the input image and predicts the digit using the loaded model.
 
-    if isinstance(image_input, dict):
-        # In newer Gradio versions or with specific Sketchpad configurations,
-        # the 'image' key might hold the composite image (all layers merged).
-        if 'image' in image_input and image_input['image'] is not None:
-            image_array = image_input['image']
-        # If 'image' is not present or None, but 'composite' is, use that.
-        # This handles cases where sketchpad might return 'composite' instead of 'image'
-        elif 'composite' in image_input and image_input['composite'] is not None:
-            image_array = image_input['composite']
-        # If no explicit image or composite, try to find a numpy array directly
-        # within the dictionary's values if there's only one. This is a less
-        # common fallback but can cover edge cases.
+    Args:
+        img: The input from the Gradio Sketchpad, which could be a NumPy array or a dictionary.
+
+    Returns:
+        tuple[dict, str]: A tuple containing:
+            - A dictionary of confidence scores for each digit (0-9).
+            - A string indicating the predicted digit.
+    """
+    if img is None:
+        return {str(i): 0.0 for i in range(10)}, "No digit drawn."
+
+    # Handle cases where Sketchpad returns a dictionary (e.g., {'background': ..., 'composite': ...})
+    # The actual drawn image is usually in the 'composite' key for Sketchpad
+    if isinstance(img, dict):
+        if 'composite' in img and img['composite'] is not None:
+            img_array = img['composite']
         else:
-            for value in image_input.values():
-                if isinstance(value, np.ndarray):
-                    image_array = value
-                    break
-    elif isinstance(image_input, np.ndarray):
-        # If image_input is already a numpy array (older Gradio or specific settings)
-        image_array = image_input
-
-    # If after all checks, image_array is still None, it means no valid drawing was provided.
-    if image_array is None:
-        # Return a black 28x28 image array as a default empty input
-        return np.zeros((1, 784))
-
-    # Ensure the image_array is of integer type before converting to PIL Image
-    # Gradio might return float arrays from sketchpad depending on its internal processing.
-    if image_array.dtype != np.uint8:
-        # Scale and convert to uint8, assuming values are between 0-255 or 0-1
-        if image_array.max() > 1.0: # If values are 0-255 already or higher
-            image_array = image_array.astype(np.uint8)
-        else: # If values are 0-1 (normalized floats)
-            image_array = (image_array * 255).astype(np.uint8)
-
-
-    img = Image.fromarray(image_array).convert("L")  # Convert to grayscale
-    img = ImageOps.invert(img)                        # Invert to white background (MNIST has white digits on black)
-    img = img.resize((28, 28))                        # Resize to 28x28 (MNIST standard)
-    img_array = np.array(img) / 255.0                 # Normalize pixel values to 0-1
-    flat = img_array.flatten().reshape(1, -1)         # Flatten to shape (1, 784) for model input
-    return flat
-
-# Prediction function
-def predict_digit(image_input):
-    processed = preprocess(image_input)
-    # Check if the processed array is all zeros (indicating an empty sketchpad)
-    if np.all(processed == 0):
-        return "Please draw a digit." # Provide a user-friendly message for empty input
+            # If 'composite' is not available or is None, it might be an empty sketchpad
+            # or a different structure. Return a message indicating no valid image data.
+            return {str(i): 0.0 for i in range(10)}, "No valid image data found in Sketchpad output."
+    elif isinstance(img, np.ndarray):
+        img_array = img
     else:
-        # For Keras models, use model.predict, which returns probabilities.
-        # We then use argmax to get the predicted digit.
-        prediction_probabilities = model.predict(processed)
-        predicted_digit = np.argmax(prediction_probabilities)
-        return f"Predicted Digit: {int(predicted_digit)}"
+        # Unexpected input type
+        return {str(i): 0.0 for i in range(10)}, "Unexpected input type from Sketchpad."
 
-# Gradio interface
-interface = gr.Interface(
+    # Now img_array should be a NumPy array, proceed with processing
+    # Convert NumPy array to PIL Image
+    # Gradio Sketchpad with image_mode="RGB" returns a NumPy array (H, W, 3)
+    img_pil = Image.fromarray(img_array.astype('uint8'), 'RGB')
+
+    # Convert to grayscale
+    img_pil = img_pil.convert('L')
+
+    # Resize to 28x28 pixels
+    img_pil = img_pil.resize((28, 28))
+
+    # Invert colors: Gradio Sketchpad typically draws black on white.
+    # MNIST models expect white digit on black background.
+    img_pil = ImageOps.invert(img_pil)
+
+    # Convert to numpy array and normalize to 0-1 range
+    img_array_processed = np.array(img_pil) / 255.0
+
+    # Reshape for the model: (batch_size, height, width, channels)
+    # This was (1, 28, 28, 1) which is not compatible with a flattened input model
+    # Flatten the image to (1, 784) for the MLP model
+    img_array_processed = img_array_processed.reshape(1, 28 * 28) # Flatten to (1, 784)
+
+    # Make prediction
+    predictions = model.predict(img_array_processed)[0] # Get the first (and only) prediction
+
+    # Get confidence scores
+    confidences = {str(i): float(predictions[i]) for i in range(10)}
+
+    # Get the predicted digit
+    predicted_digit = str(np.argmax(predictions))
+
+    return confidences, f"Predicted Digit: {predicted_digit}"
+
+# Create the Gradio interface
+# The Sketchpad allows users to draw directly.
+# The output will be a Label showing probabilities and a Textbox for the predicted digit.
+iface = gr.Interface(
     fn=predict_digit,
-    inputs=gr.Sketchpad(label="Draw a digit (0–9)"),
-    outputs="text",
-    title="MLP Digit Recognizer", # Changed title to reflect MLP
-    theme="soft"
+    inputs=gr.Sketchpad(
+        label="Draw a digit (0-9) here",
+        image_mode="RGB", # Sketchpad outputs RGB, we convert to L (grayscale) inside the function
+        # Removed 'shape' argument as it's not supported by gr.Sketchpad in recent Gradio versions.
+        # Removed 'brush_color' and 'brush_radius' arguments as they are also not supported
+        # in some Gradio versions. Default brush settings will be used.
+        # Removed 'invert_colors' argument as it's not supported in some Gradio versions.
+    ),
+    outputs=[
+        gr.Label(label="Confidence Scores", num_top_classes=10),
+        gr.Textbox(label="Prediction")
+    ],
+    title="Handwritten Digit Recognizer",
+    description="Draw a single digit (0-9) in the sketchpad, and the model will predict what it is!",
+    allow_flagging="never" # Disable flagging feature
 )
 
-# Launch app
-if __name__ == "__main__":
-    interface.launch()
+# Launch the Gradio interface
+iface.launch()
